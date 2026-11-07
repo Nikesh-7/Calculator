@@ -1,0 +1,7 @@
+com\example\calculator\config\CorsConfig$1.class
+com\example\calculator\config\CorsConfig.class
+com\example\calculator\repository\CalculationRepository.class
+com\example\calculator\controller\CalculationController$CalculationRequest.class
+com\example\calculator\model\Calculation.class
+com\example\calculator\controller\CalculationController.class
+com\example\calculator\CalculatorApplication.class
