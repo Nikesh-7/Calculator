@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculator</title>
+<style>
+  :root {
+    --bg: #e9edf2; --body: #1f2a37; --screen: #dfe8d5; --ink: #1c2417;
+    --key: #f6f7f9; --key-text: #1f2a37; --op: #3b5b8c; --op-text: #fff;
+    --accent: #e0832b; --util: #c9d0da; --panel: #ffffff; --panel-text: #1f2a37;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12161c; --body: #232b36; --key: #3a4452; --key-text: #f1f4f8;
+            --util: #56627a; --panel: #232b36; --panel-text: #f1f4f8; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; gap: 20px; flex-wrap: wrap; padding: 16px;
+    font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  }
+  .calc { width: 100%; max-width: 340px; background: var(--body); border-radius: 22px;
+          padding: 18px; box-shadow: 0 18px 40px rgba(0,0,0,.25); }
+  .screen { background: var(--screen); color: var(--ink); border-radius: 12px; padding: 12px 14px;
+            margin-bottom: 16px; text-align: right; min-height: 92px; display: flex;
+            flex-direction: column; justify-content: flex-end; overflow: hidden; }
+  .history-line { font-family: "Courier New", monospace; font-size: 14px; opacity: .65; min-height: 20px; }
+  .display { font-family: "Courier New", monospace; font-size: 38px; font-weight: 700;
+             line-height: 1.2; word-break: break-all; }
+  .display.small { font-size: 26px; }
+  .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  button { font: inherit; font-size: 22px; height: 58px; border: 0; border-radius: 12px;
+           background: var(--key); color: var(--key-text); cursor: pointer;
+           box-shadow: 0 3px 0 rgba(0,0,0,.25); }
+  button:active { transform: translateY(3px); box-shadow: none; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .util { background: var(--util); } .op { background: var(--op); color: var(--op-text); }
+  .eq { background: var(--accent); color: #fff; } .wide { grid-column: span 2; }
+  .panel { width: 100%; max-width: 340px; background: var(--panel); color: var(--panel-text);
+           border-radius: 18px; padding: 16px; box-shadow: 0 10px 28px rgba(0,0,0,.15); align-self: flex-start; }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .panel h2 { font-size: 18px; }
+  .clear-btn { height: 32px; font-size: 14px; padding: 0 12px; box-shadow: none; }
+  .panel ul { list-style: none; padding: 0; font-family: "Courier New", monospace; font-size: 15px; }
+  .panel li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0;
+              border-bottom: 1px solid rgba(128,128,128,.25); }
+  .empty { opacity: .6; font-size: 14px; }
+  .status { font-size: 13px; margin-top: 8px; color: #c0392b; min-height: 16px; }
+</style>
+</head>
+<body>
+  <main class="calc" aria-label="Calculator">
+    <div class="screen" aria-live="polite">
+      <div class="history-line" id="line"></div>
+      <div class="display" id="display">0</div>
+    </div>
+    <div class="keys" id="keys">
+      <button class="util" data-action="clear">AC</button>
+      <button class="util" data-action="delete" aria-label="Delete">⌫</button>
+      <button class="util" data-action="percent">%</button>
+      <button class="op" data-op="/">÷</button>
+      <button data-num="7">7</button><button data-num="8">8</button><button data-num="9">9</button>
+      <button class="op" data-op="*">×</button>
+      <button data-num="4">4</button><button data-num="5">5</button><button data-num="6">6</button>
+      <button class="op" data-op="-">−</button>
+      <button data-num="1">1</button><button data-num="2">2</button><button data-num="3">3</button>
+      <button class="op" data-op="+">+</button>
+      <button data-num="0" class="wide">0</button><button data-num=".">.</button>
+      <button class="eq" data-action="equals">=</button>
+    </div>
+  </main>
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h2>History</h2>
+      <button class="clear-btn util" id="clearHistory">Clear</button>
+    </div>
+    <ul id="historyList"></ul>
+    <p class="status" id="status"></p>
+  </aside>
+
+<script>
+  // Same origin as the backend, so no URL needed
+  var API = "/api";
+  var displayEl = document.getElementById("display");
+  var lineEl = document.getElementById("line");
+  var listEl = document.getElementById("historyList");
+  var statusEl = document.getElementById("status");
+  var symbols = { "+": "+", "-": "−", "*": "×", "/": "÷" };
+
+  var current = "0", previous = null, operator = null, justEvaluated = false;
+
+  function render() {
+    displayEl.textContent = current;
+    displayEl.classList.toggle("small", current.length > 9);
+    lineEl.textContent = operator ? previous + " " + symbols[operator] : "";
+  }
+
+  function setStatus(msg) { statusEl.textContent = msg || ""; }
+
+  async function calcOnServer(a, b, op) {
+    var res = await fetch(API + "/calculate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ a: a, b: b, op: op })
+    });
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Calculation failed");
+    return String(data.result);
+  }
+
+  async function loadHistory() {
+    try {
+      var res = await fetch(API + "/history");
+      var items = await res.json();
+      listEl.innerHTML = "";
+      if (!items.length) {
+        listEl.innerHTML = '<li class="empty">No calculations yet.</li>';
+        return;
+      }
+      items.forEach(function (it) {
+        var li = document.createElement("li");
+        var left = document.createElement("span");
+        var right = document.createElement("strong");
+        left.textContent = it.expression.replace("*", "×").replace("/", "÷");
+        right.textContent = "= " + it.result;
+        li.appendChild(left); li.appendChild(right);
+        listEl.appendChild(li);
+      });
+    } catch (e) {
+      setStatus("Cannot reach the server. If it was idle, wait a minute and refresh.");
+    }
+  }
+
+  function inputNumber(n) {
+    if (justEvaluated) { current = "0"; justEvaluated = false; }
+    if (n === "." && current.indexOf(".") !== -1) return;
+    if (current === "0" && n !== ".") current = n;
+    else if (current.length < 15) current += n;
+    render();
+  }
+
+  async function chooseOperator(op) {
+    setStatus("");
+    if (isNaN(parseFloat(current))) return;
+    try {
+      if (operator && !justEvaluated) {
+        current = await calcOnServer(previous, current, operator);
+        loadHistory();
+      }
+    } catch (e) { setStatus(e.message); reset(); return; }
+    previous = current; operator = op; current = "0"; justEvaluated = false;
+    displayEl.textContent = previous;
+    lineEl.textContent = previous + " " + symbols[op];
+  }
+
+  async function equals() {
+    if (!operator) return;
+    setStatus("");
+    var expr = previous + " " + symbols[operator] + " " + current + " =";
+    try {
+      var result = await calcOnServer(previous, current, operator);
+      current = result; justEvaluated = true;
+      operator = null; previous = null;
+      displayEl.textContent = current;
+      displayEl.classList.toggle("small", current.length > 9);
+      lineEl.textContent = expr;
+      loadHistory();
+    } catch (e) {
+      setStatus(e.message);
+      reset();
+    }
+  }
+
+  function reset() { current = "0"; previous = null; operator = null; justEvaluated = false; render(); }
+
+  function del() {
+    if (justEvaluated) return;
+    current = current.length > 1 ? current.slice(0, -1) : "0";
+    if (current === "-") current = "0";
+    render();
+  }
+
+  function percent() {
+    var v = parseFloat(current);
+    if (isNaN(v)) return;
+    current = String(parseFloat((v / 100).toPrecision(12)));
+    render();
+  }
+
+  document.getElementById("keys").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.num !== undefined) inputNumber(b.dataset.num);
+    else if (b.dataset.op) chooseOperator(b.dataset.op);
+    else if (b.dataset.action === "equals") equals();
+    else if (b.dataset.action === "clear") { setStatus(""); reset(); }
+    else if (b.dataset.action === "delete") del();
+    else if (b.dataset.action === "percent") percent();
+  });
+
+  document.getElementById("clearHistory").addEventListener("click", async function () {
+    try { await fetch(API + "/history", { method: "DELETE" }); } catch (e) {}
+    loadHistory();
+  });
+
+  document.addEventListener("keydown", function (e) {
+    var k = e.key;
+    if ((k >= "0" && k <= "9") || k === ".") inputNumber(k);
+    else if ("+-*/".indexOf(k) !== -1) { e.preventDefault(); chooseOperator(k); }
+    else if (k === "Enter" || k === "=") { e.preventDefault(); equals(); }
+    else if (k === "Backspace") del();
+    else if (k === "Escape") reset();
+    else if (k === "%") percent();
+  });
+
+  render();
+  loadHistory();
+</script>
+</body>
+</html>
